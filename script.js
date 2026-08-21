@@ -104,6 +104,9 @@ document.getElementById("loginForm").addEventListener("submit", async function (
     }
 
     // Successfully logged in — onAuthStateChange will handle the rest
+    submitBtn.disabled = false;
+    btnText.style.display = "inline";
+    btnSpinner.style.display = "none";
   } catch (err) {
     var message = "Login failed. Please check your credentials.";
     if (err.message) {
@@ -159,22 +162,28 @@ document.getElementById("logoutBtn").addEventListener("click", async function ()
 
 // Auth state change listener
 supabase.auth.onAuthStateChange(async function (event, session) {
-  if (event === "SIGNED_IN" && session) {
-    currentUser = session.user;
-    showAppView();
-    await loadUserProfile();
-    updateHeaderUserInfo();
-    applyRoleVisibility();
-    await loadAllData();
-    setupRealtime();
-    hideAppLoading();
-  } else if (event === "SIGNED_OUT") {
-    currentUser = null;
-    currentUserProfile = null;
-    categories = [];
-    questions = [];
-    cleanupRealtime();
+  try {
+    if (event === "SIGNED_IN" && session) {
+      currentUser = session.user;
+      showAppView();
+      await loadUserProfile();
+      updateHeaderUserInfo();
+      applyRoleVisibility();
+      await loadAllData();
+      setupRealtime();
+    } else if (event === "SIGNED_OUT") {
+      currentUser = null;
+      currentUserProfile = null;
+      categories = [];
+      questions = [];
+      cleanupRealtime();
+      showLoginView();
+    }
+  } catch (e) {
+    console.error("Auth state error:", e);
     showLoginView();
+  } finally {
+    hideAppLoading();
   }
 });
 
