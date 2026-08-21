@@ -1,56 +1,9 @@
-/* =================================================================
-   DR NAEEM Eye Laser & Retina Center Call Assistant
-   Cloud-based version using Supabase
-   
-   IMPORTANT: Replace the two values below with your Supabase
-   project credentials from: https://supabase.com/dashboard → Settings → API
-   ================================================================= */
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
 
 var SUPABASE_URL = "https://ffijqmiaiipohxscpiyv.supabase.co";
 var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZmaWpxbWlhaWlwb2h4c2NwaXl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyNDYzNjYsImV4cCI6MjEwMjgyMjM2Nn0.8Ncr6sT3gnPKgS_pEzDpYgsdiRMqcf8crPbxzvQi7C0";
 
-/* =================================================================
-   SUPABASE INITIALIZATION
-   ================================================================= */
-
-var supabase = null;
-try {
-  var _sb = window.supabase || (typeof self !== 'undefined' && self.supabase);
-  console.log("[DEBUG] supabase found:", typeof _sb);
-  if (!_sb || !_sb.createClient) {
-    throw new Error("Supabase SDK not loaded.");
-  }
-  supabase = _sb.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  console.log("[DEBUG] Supabase client created successfully");
-} catch (e) {
-  console.error("Failed to initialize Supabase:", e);
-  document.addEventListener("DOMContentLoaded", function () {
-    var errEl = document.getElementById("loginError");
-    if (errEl) {
-      errEl.textContent = "Failed to connect to the server: " + e.message;
-      errEl.style.display = "block";
-    }
-    hideAppLoading();
-  });
-}
-
-// Guard: if supabase failed to init, prevent all auth calls from crashing
-if (!supabase) {
-  // Override the login form to show an error instead of crashing
-  document.addEventListener("DOMContentLoaded", function () {
-    var loginForm = document.getElementById("loginForm");
-    if (loginForm) {
-      loginForm.addEventListener("submit", function (e) {
-        e.preventDefault();
-        var errEl = document.getElementById("loginError");
-        if (errEl) {
-          errEl.textContent = "Unable to connect to the server. Please refresh the page.";
-          errEl.style.display = "block";
-        }
-      });
-    }
-  });
-}
+var supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* =================================================================
    1. DATA MODEL & STATE
@@ -141,7 +94,6 @@ document.getElementById("loginForm").addEventListener("submit", async function (
   btnSpinner.style.display = "inline-block";
 
   try {
-    if (!supabase) throw new Error("Server not connected. Please refresh the page.");
     var result = await supabase.auth.signInWithPassword({
       email: email,
       password: password
@@ -192,7 +144,7 @@ document.getElementById("togglePasswordBtn").addEventListener("click", function 
 // Logout
 document.getElementById("logoutBtn").addEventListener("click", async function () {
   try {
-    if (supabase) await supabase.auth.signOut();
+    await supabase.auth.signOut();
   } catch (e) {
     console.error("Logout error:", e);
   }
@@ -206,7 +158,7 @@ document.getElementById("logoutBtn").addEventListener("click", async function ()
 });
 
 // Auth state change listener
-if (supabase) supabase.auth.onAuthStateChange(async function (event, session) {
+supabase.auth.onAuthStateChange(async function (event, session) {
   if (event === "SIGNED_IN" && session) {
     currentUser = session.user;
     showAppView();
@@ -381,7 +333,6 @@ async function dbDeleteQuestion(id) {
 
 function setupRealtime() {
   cleanupRealtime();
-  if (!supabase) return;
 
   realtimeChannel = supabase
     .channel("db-changes")
@@ -413,7 +364,7 @@ function setupRealtime() {
 }
 
 function cleanupRealtime() {
-  if (realtimeChannel && supabase) {
+  if (realtimeChannel) {
     supabase.removeChannel(realtimeChannel);
     realtimeChannel = null;
   }
@@ -1335,11 +1286,6 @@ function refreshEverything() {
 (async function start() {
   // Check if user is already logged in (session persistence)
   try {
-    if (!supabase) {
-      showLoginView();
-      hideAppLoading();
-      return;
-    }
     var result = await supabase.auth.getSession();
     var session = result.data.session;
 
