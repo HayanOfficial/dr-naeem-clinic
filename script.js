@@ -166,10 +166,10 @@ supabase.auth.onAuthStateChange(async function (event, session) {
     if (event === "SIGNED_IN" && session) {
       currentUser = session.user;
       showAppView();
-      await loadUserProfile();
+      // Load profile AND data in parallel
+      await Promise.all([loadUserProfile(), loadAllData()]);
       updateHeaderUserInfo();
       applyRoleVisibility();
-      await loadAllData();
       setupRealtime();
     } else if (event === "SIGNED_OUT") {
       currentUser = null;
@@ -219,22 +219,18 @@ async function loadUserProfile() {
    ================================================================= */
 
 async function loadAllData() {
-  showAppLoading();
   try {
-    // Load categories
-    var catResult = await supabase
-      .from("categories")
-      .select("*")
-      .order("name");
+    // Load categories AND questions in parallel (much faster)
+    var results = await Promise.all([
+      supabase.from("categories").select("*").order("name"),
+      supabase.from("questions").select("*").order("created_at", { ascending: false })
+    ]);
+
+    var catResult = results[0];
+    var qResult = results[1];
 
     if (catResult.error) throw catResult.error;
     categories = catResult.data || [];
-
-    // Load questions
-    var qResult = await supabase
-      .from("questions")
-      .select("*")
-      .order("created_at", { ascending: false });
 
     if (qResult.error) throw qResult.error;
     questions = qResult.data || [];
@@ -262,7 +258,6 @@ async function loadAllData() {
     console.error("Error loading data:", e);
     showModalStatus("Failed to load data from cloud. Please refresh.", false);
   }
-  hideAppLoading();
 }
 
 // --- Category CRUD ---
@@ -1294,17 +1289,19 @@ function refreshEverything() {
 
 (async function start() {
   try {
+    // getSession() is instant — reads from browser storage
     var result = await supabase.auth.getSession();
     var session = result.data.session;
 
     if (session && session.user) {
       currentUser = session.user;
       showAppView();
+
       try {
-        await loadUserProfile();
+        // Load profile AND data in parallel — cuts wait in half
+        await Promise.all([loadUserProfile(), loadAllData()]);
         updateHeaderUserInfo();
         applyRoleVisibility();
-        await loadAllData();
         setupRealtime();
       } catch (loadErr) {
         console.error("Session load failed, signing out:", loadErr);
