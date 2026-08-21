@@ -15,12 +15,12 @@ var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 
 var supabase = null;
 try {
-  console.log("[DEBUG] window.supabase type:", typeof window.supabase);
-  if (typeof window.supabase === 'undefined' || !window.supabase || !window.supabase.createClient) {
-    console.error("[DEBUG] SDK not loaded. window.supabase:", window.supabase);
+  var _sb = window.supabase || (typeof self !== 'undefined' && self.supabase);
+  console.log("[DEBUG] supabase found:", typeof _sb);
+  if (!_sb || !_sb.createClient) {
     throw new Error("Supabase SDK not loaded.");
   }
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  supabase = _sb.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   console.log("[DEBUG] Supabase client created successfully");
 } catch (e) {
   console.error("Failed to initialize Supabase:", e);
