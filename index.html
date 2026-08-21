@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DR NAEEM Eye Laser & Retina Center Call Assistant</title>
+  <link rel="icon" type="image/png" href="logo.png">
+  <link rel="preload" href="JameelNooriNastaleeq.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- =========================================================
+       LOGIN VIEW (shown when not authenticated)
+       ========================================================= -->
+  <div id="loginView" class="login-view">
+    <div class="login-card-container">
+      <!-- Left: Login Form -->
+      <div class="login-form-side">
+        <div class="login-form-inner">
+          <div class="login-brand">
+            <img class="login-logo" src="logo.png" alt="DR NAEEM Clinic logo">
+            <h1>DR NAEEM Eye Laser & Retina Center</h1>
+            <p>Call Assistant — Sign In</p>
+          </div>
+
+          <form id="loginForm" class="login-form" autocomplete="on">
+            <div class="field">
+              <label for="loginEmail">Email</label>
+              <input type="email" id="loginEmail" placeholder="you@clinic.com" required autocomplete="email">
+            </div>
+
+            <div class="field">
+              <label for="loginPassword">Password</label>
+              <div class="password-field-wrap">
+                <input type="password" id="loginPassword" placeholder="Enter your password" required autocomplete="current-password">
+                <button type="button" class="password-toggle-btn" id="togglePasswordBtn" tabindex="-1" aria-label="Show password">
+                  <span id="eyeOpenIcon">👁</span>
+                  <span id="eyeClosedIcon" style="display:none;">👁‍🗨</span>
+                </button>
+              </div>
+            </div>
+
+            <div id="loginError" class="login-error" style="display:none;"></div>
+
+            <button type="submit" class="btn-primary login-submit-btn" id="loginSubmitBtn">
+              <span id="loginBtnText">Sign In</span>
+              <span id="loginBtnSpinner" class="login-spinner" style="display:none;"></span>
+            </button>
+          </form>
+
+          <p class="login-footer-text">Authorized staff only. Contact admin for access.</p>
+        </div>
+      </div>
+
+      <!-- Right: Dark Showcase -->
+      <div class="login-showcase-side">
+        <div class="showcase-visual-wrap">
+          <div class="showcase-img-frame">
+            <img class="showcase-img" src="logo.png" alt="Clinic">
+          </div>
+        </div>
+        <div class="showcase-text-wrap">
+          <h3>Cloud-Based Call Assistant</h3>
+          <p>Real-time, secure, multi-user access to clinic-approved answers.</p>
+        </div>
+        <div class="showcase-dots">
+          <span class="dot active"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       MAIN APP (hidden until authenticated)
+       ========================================================= -->
+  <div id="appContainer" class="app-container" style="display:none;">
+
+    <!-- APP HEADER -->
+    <header class="app-header">
+      <div class="brand">
+        <img class="eye-icon" src="logo.png" alt="DR NAEEM Clinic logo">
+        <div class="brand-text">
+          <h1>DR NAEEM Eye Laser & Retina Center Call Assistant</h1>
+          <p id="headerSubtitle">Quick answers for phone calls</p>
+        </div>
+      </div>
+
+      <div class="header-search" id="assistantSearchWrap">
+        <div class="search-box search-box-lg">
+          <input type="text" id="searchInput" placeholder="Search questions, topics or keywords (English & Urdu)...">
+        </div>
+      </div>
+
+      <!-- Header Right Buttons -->
+      <div class="header-right-group">
+        <div class="header-right" id="assistantHeaderRight">
+          <button class="nav-btn solid" id="goManageBtn">Manage Content</button>
+        </div>
+
+        <div class="header-right" id="manageHeaderRight" style="display:none;">
+          <button class="nav-btn" id="goAssistantBtn">&larr; Back to Assistant</button>
+        </div>
+
+        <!-- User Profile & Logout -->
+        <div class="user-profile-pill" id="userProfilePill">
+          <span class="user-avatar-badge">👤</span>
+          <div class="user-meta">
+            <span class="user-name-text" id="userNameDisplay">User</span>
+            <span class="user-role-tag" id="userRoleDisplay">USER</span>
+          </div>
+        </div>
+        <button class="nav-btn-logout" id="logoutBtn">Logout</button>
+      </div>
+    </header>
+
+    <!-- Loading Overlay (shown while app data loads) -->
+    <div id="appLoadingOverlay" class="app-loading-overlay">
+      <div class="app-loading-content">
+        <div class="login-spinner large"></div>
+        <p>Loading Call Assistant...</p>
+      </div>
+    </div>
+
+    <!-- =========================================================
+         ASSISTANT VIEW (Used during patient phone calls)
+         ========================================================= -->
+    <div id="assistantView">
+      <div class="assistant-wrap">
+
+        <div class="card card-pad category-card">
+          <div class="panel-label">Categories</div>
+          <ul class="category-list" id="categoryList"></ul>
+        </div>
+
+        <div class="qa-wrap">
+          <div class="card card-pad question-card-wrap">
+            <div class="question-panel-head">
+              <div class="panel-label"><span class="status-dot"></span><span id="questionListTitle">Questions</span></div>
+              <span class="item-count-badge" id="questionCountBadge">0 items</span>
+            </div>
+            <ul class="question-list" id="questionList"></ul>
+          </div>
+
+          <div class="card" id="answerPanel">
+            <div class="placeholder">Select a question to see the approved answer.</div>
+          </div>
+        </div>
+
+      </div>
+
+      <footer class="disclaimer">
+        DR NAEEM Eye Laser & Retina Center Call Guidance System
+      </footer>
+    </div>
+
+    <!-- =========================================================
+         MANAGE VIEW (Content Management — Admin Only)
+         ========================================================= -->
+    <div id="manageView">
+      <div class="manage-wrap">
+
+        <div class="manage-sidebar">
+          <h2>Call Assistant</h2>
+          <p class="sub">Control &amp; Content Manager</p>
+          <button class="new-entry-btn" id="newEntryBtn">+ New Entry</button>
+
+          <ul class="side-nav">
+            <li><button class="active" data-pane="pane-questions">Questions</button></li>
+            <li><button data-pane="pane-categories">Categories</button></li>
+            <li><button data-pane="pane-users">Users</button></li>
+            <li><button data-pane="pane-backup">Backup</button></li>
+          </ul>
+        </div>
+
+        <div class="manage-content">
+          <div class="manage-header-row">
+            <div>
+              <h1 id="managePaneHeading">Manage Content</h1>
+              <p class="lead" id="managePaneSubtitle">Organize and update the knowledge base for the Call Assistant.</p>
+            </div>
+          </div>
+
+          <!-- PANE: QUESTIONS -->
+          <div class="manage-pane active" id="pane-questions">
+
+            <div class="entry-form card card-pad" id="questionFormCard">
+              <div class="entry-form-head">
+                <h3 id="questionFormTitle">Add Question</h3>
+                <button type="button" class="icon-btn" id="closeQuestionFormBtn">Close</button>
+              </div>
+              <form id="questionForm">
+                <input type="hidden" id="questionId">
+
+                <div class="field">
+                  <label for="questionCategory">Category</label>
+                  <select id="questionCategory"></select>
+                </div>
+
+                <div class="field">
+                  <label for="questionText">Question</label>
+                  <input type="text" id="questionText" placeholder="e.g. What is SMILE Pro? or اردو میں سوال">
+                </div>
+
+                <div class="field">
+                  <label for="answerText">Answer</label>
+                  <textarea id="answerText" placeholder="Type the clinic-approved answer here (Urdu or English)"></textarea>
+                </div>
+
+                <div class="field">
+                  <label for="keywordsText">Keywords</label>
+                  <input type="text" id="keywordsText" placeholder="comma separated, e.g. smile, laser, vision, cost">
+                  <div class="field-hint">Used to help the search find this question. Not shown to the caller-facing side.</div>
+                </div>
+
+                <div class="form-actions">
+                  <button type="submit" class="btn-primary" id="saveQuestionBtn">Save Question</button>
+                  <button type="button" class="btn-secondary" id="cancelQuestionEditBtn">Cancel</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="toolbar">
+              <div class="search-box"><input type="text" id="manageQuestionSearch" placeholder="Search questions..."></div>
+              <div class="spacer"></div>
+              <button class="btn-primary" id="addQuestionBtn">+ Add Question</button>
+            </div>
+
+            <div class="card">
+              <table class="data-table">
+                <thead>
+                  <tr><th>Question</th><th>Category</th><th>Actions</th></tr>
+                </thead>
+                <tbody id="manageQuestionList"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- PANE: CATEGORIES -->
+          <div class="manage-pane" id="pane-categories">
+
+            <div class="entry-form card card-pad" id="categoryFormCard">
+              <div class="entry-form-head">
+                <h3 id="categoryFormTitle">Add Category</h3>
+                <button type="button" class="icon-btn" id="closeCategoryFormBtn">Close</button>
+              </div>
+              <form id="categoryForm">
+                <input type="hidden" id="categoryId">
+                <div class="field">
+                  <label for="categoryName">Category name</label>
+                  <input type="text" id="categoryName" placeholder="e.g. Corneal Treatment or موتیابند">
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="btn-primary" id="saveCategoryBtn">Save Category</button>
+                  <button type="button" class="btn-secondary" id="cancelCategoryEditBtn">Cancel</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="toolbar">
+              <div class="spacer"></div>
+              <button class="btn-primary" id="addCategoryBtn">+ Add Category</button>
+            </div>
+
+            <div class="card">
+              <table class="data-table">
+                <thead>
+                  <tr><th>Category</th><th>Questions</th><th>Actions</th></tr>
+                </thead>
+                <tbody id="manageCategoryList"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- PANE: USERS (Admin only) -->
+          <div class="manage-pane" id="pane-users">
+
+            <div class="user-stats-grid" id="userStatsGrid">
+              <div class="user-stat-card">
+                <span class="stat-number" id="statTotalUsers">0</span>
+                <span class="stat-label">Total Users</span>
+              </div>
+              <div class="user-stat-card">
+                <span class="stat-number" id="statActiveUsers">0</span>
+                <span class="stat-label">Active</span>
+              </div>
+              <div class="user-stat-card">
+                <span class="stat-number" id="statAdminUsers">0</span>
+                <span class="stat-label">Admins</span>
+              </div>
+            </div>
+
+            <!-- User Form -->
+            <div class="entry-form card card-pad" id="userFormCard">
+              <div class="entry-form-head">
+                <h3 id="userFormTitle">Create New User</h3>
+                <button type="button" class="icon-btn" id="closeUserFormBtn">Close</button>
+              </div>
+              <form id="userForm">
+                <input type="hidden" id="editUserId">
+                <div class="form-row-2">
+                  <div class="field">
+                    <label for="userName">Full Name</label>
+                    <input type="text" id="userName" placeholder="Dr. Ahmed" required>
+                  </div>
+                  <div class="field">
+                    <label for="userEmail">Email</label>
+                    <input type="email" id="userEmail" placeholder="user@clinic.com" required>
+                  </div>
+                </div>
+                <div class="form-row-2">
+                  <div class="field" id="passwordFieldWrap">
+                    <label for="userPassword">Password</label>
+                    <input type="password" id="userPassword" placeholder="Min 6 characters" minlength="6">
+                    <div class="field-hint" id="passwordHint">Required for new users. Leave blank to keep current password when editing.</div>
+                  </div>
+                  <div class="field">
+                    <label for="userRole">Role</label>
+                    <select id="userRole">
+                      <option value="user">User</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="btn-primary" id="saveUserBtn">Create User</button>
+                  <button type="button" class="btn-secondary" id="cancelUserEditBtn">Cancel</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="toolbar">
+              <div class="spacer"></div>
+              <button class="btn-primary" id="addUserBtn">+ Create User</button>
+            </div>
+
+            <div class="card">
+              <table class="data-table">
+                <thead>
+                  <tr><th>User</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th></tr>
+                </thead>
+                <tbody id="manageUserList"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- PANE: BACKUP (Admin only) -->
+          <div class="manage-pane" id="pane-backup">
+            <div class="card card-pad backup-card">
+              <h3>Data Export</h3>
+              <p class="text-sub">
+                Export a JSON backup of all questions and categories for emergency offline use. The cloud database is the primary source of truth.
+              </p>
+              <div class="backup-actions">
+                <button class="btn-primary" id="exportBtn">Export Backup (JSON)</button>
+              </div>
+              <div id="backupStatus"></div>
+            </div>
+
+            <div class="card card-pad backup-card" style="margin-top:1rem;">
+              <h3>Realtime Status</h3>
+              <p class="text-sub">Live synchronization with Supabase Realtime.</p>
+              <div class="cloud-indicator-badge" id="realtimeStatusBadge">
+                <span class="cloud-dot"></span>
+                <span id="realtimeStatusText">Connecting...</span>
+              </div>
+            </div>
+          </div>
+
+          <div id="modalStatus"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Supabase JS SDK (local copy) -->
+  <script src="supabase.min.js"></script>
+  <!-- App Scripts -->
+  <script src="script.js"></script>
+</body>
+</html>

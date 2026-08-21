@@ -1,0 +1,9 @@
+{
+  "name": "dr-naeem-eye-clinic-call-assistant",
+  "version": "2.0.0",
+  "private": true,
+  "description": "DR NAEEM Eye Laser & Retina Center Call Assistant - Cloud-based multi-user application",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1"
+  }
+}
