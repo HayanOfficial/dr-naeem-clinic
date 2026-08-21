@@ -1,9 +1,9 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1';
+
 
 var SUPABASE_URL = "https://ffijqmiaiipohxscpiyv.supabase.co";
 var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZmaWpxbWlhaWlwb2h4c2NwaXl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyNDYzNjYsImV4cCI6MjEwMjgyMjM2Nn0.8Ncr6sT3gnPKgS_pEzDpYgsdiRMqcf8crPbxzvQi7C0";
 
-var supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+var supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* =================================================================
    1. DATA MODEL & STATE
