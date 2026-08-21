@@ -1293,7 +1293,6 @@ function refreshEverything() {
    ================================================================= */
 
 (async function start() {
-  // Check if user is already logged in (session persistence)
   try {
     var result = await supabase.auth.getSession();
     var session = result.data.session;
@@ -1301,19 +1300,26 @@ function refreshEverything() {
     if (session && session.user) {
       currentUser = session.user;
       showAppView();
-      await loadUserProfile();
-      updateHeaderUserInfo();
-      applyRoleVisibility();
-      await loadAllData();
-      setupRealtime();
-      hideAppLoading();
+      try {
+        await loadUserProfile();
+        updateHeaderUserInfo();
+        applyRoleVisibility();
+        await loadAllData();
+        setupRealtime();
+      } catch (loadErr) {
+        console.error("Session load failed, signing out:", loadErr);
+        await supabase.auth.signOut();
+        currentUser = null;
+        currentUserProfile = null;
+        showLoginView();
+      }
     } else {
       showLoginView();
-      hideAppLoading();
     }
   } catch (e) {
     console.error("Startup error:", e);
     showLoginView();
+  } finally {
     hideAppLoading();
   }
 })();
