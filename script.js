@@ -1287,6 +1287,11 @@ function refreshEverything() {
    17. STARTUP
    ================================================================= */
 
+function hideStartupLoader() {
+  var el = document.getElementById("startupLoader");
+  if (el) el.style.display = "none";
+}
+
 (async function start() {
   try {
     // getSession() is instant — reads from browser storage
@@ -1296,6 +1301,7 @@ function refreshEverything() {
     if (session && session.user) {
       currentUser = session.user;
       showAppView();
+      hideStartupLoader();
 
       try {
         // Load profile AND data in parallel — cuts wait in half
@@ -1308,13 +1314,16 @@ function refreshEverything() {
         await supabase.auth.signOut();
         currentUser = null;
         currentUserProfile = null;
+        hideStartupLoader();
         showLoginView();
       }
     } else {
+      hideStartupLoader();
       showLoginView();
     }
   } catch (e) {
     console.error("Startup error:", e);
+    hideStartupLoader();
     showLoginView();
   } finally {
     hideAppLoading();

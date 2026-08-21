@@ -10,10 +10,17 @@
 </head>
 <body>
 
+<!-- Startup loader (shown while checking session — sits above both views) -->
+<div id="startupLoader" style="display:flex;align-items:center;justify-content:center;height:100vh;background:#f8fafc;font-family:system-ui,sans-serif;flex-direction:column;gap:16px;">
+  <img src="logo.png" alt="Logo" style="width:80px;height:80px;border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.1);">
+  <div class="login-spinner large"></div>
+  <p style="color:#64748b;margin:0;">Loading...</p>
+</div>
+
   <!-- =========================================================
        LOGIN VIEW (shown when not authenticated)
        ========================================================= -->
-  <div id="loginView" class="login-view">
+  <div id="loginView" class="login-view" style="display:none;">
     <div class="login-card-container">
       <!-- Left: Login Form -->
       <div class="login-form-side">
@@ -117,7 +124,7 @@
     </header>
 
     <!-- Loading Overlay (shown while app data loads) -->
-    <div id="appLoadingOverlay" class="app-loading-overlay hidden">
+    <div id="appLoadingOverlay" class="app-loading-overlay">
       <div class="app-loading-content">
         <div class="login-spinner large"></div>
         <p>Loading Call Assistant...</p>
