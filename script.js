@@ -15,17 +15,19 @@ var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYm
 
 var supabase = null;
 try {
+  console.log("[DEBUG] window.supabase type:", typeof window.supabase);
   if (typeof window.supabase === 'undefined' || !window.supabase || !window.supabase.createClient) {
-    throw new Error("Supabase SDK not loaded. Check that supabase.min.js is present and accessible.");
+    console.error("[DEBUG] SDK not loaded. window.supabase:", window.supabase);
+    throw new Error("Supabase SDK not loaded.");
   }
   supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  console.log("[DEBUG] Supabase client created successfully");
 } catch (e) {
   console.error("Failed to initialize Supabase:", e);
-  // Show error in the login view so the user knows what's wrong
   document.addEventListener("DOMContentLoaded", function () {
     var errEl = document.getElementById("loginError");
     if (errEl) {
-      errEl.textContent = "Failed to connect to the server. Please check your internet connection and try again.";
+      errEl.textContent = "Failed to connect to the server: " + e.message;
       errEl.style.display = "block";
     }
     hideAppLoading();
