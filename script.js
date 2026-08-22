@@ -46,6 +46,17 @@ function isAdmin() {
 function showLoginView() {
   document.getElementById("loginView").style.display = "flex";
   document.getElementById("appContainer").style.display = "none";
+  // Reset login form to clean state
+  var loginForm = document.getElementById("loginForm");
+  if (loginForm) loginForm.reset();
+  var errEl = document.getElementById("loginError");
+  if (errEl) errEl.style.display = "none";
+  var submitBtn = document.getElementById("loginSubmitBtn");
+  if (submitBtn) submitBtn.disabled = false;
+  var btnText = document.getElementById("loginBtnText");
+  if (btnText) btnText.style.display = "inline";
+  var btnSpinner = document.getElementById("loginBtnSpinner");
+  if (btnSpinner) btnSpinner.style.display = "none";
 }
 
 // Show app, hide login
@@ -146,32 +157,69 @@ document.getElementById("togglePasswordBtn").addEventListener("click", function 
 
 // Logout
 document.getElementById("logoutBtn").addEventListener("click", async function () {
+  var btn = document.getElementById("logoutBtn");
+  btn.disabled = true;
+  btn.textContent = "Signing out...";
+
   try {
-    await supabase.auth.signOut();
+    // signOut with 5 second timeout — don't hang forever
+    await Promise.race([
+      supabase.auth.signOut(),
+      new Promise(function (_, reject) {
+        setTimeout(function () { reject(new Error("Logout timeout")); }, 5000);
+      })
+    ]);
   } catch (e) {
     console.error("Logout error:", e);
   }
+
+  // Always clean up and go to login — even if signOut failed
   currentUser = null;
   currentUserProfile = null;
   categories = [];
   questions = [];
   activeCategoryId = null;
   activeQuestionId = null;
+  cleanupRealtime();
+  btn.disabled = false;
+  btn.textContent = "Logout";
   showLoginView();
 });
+
+// Flag to prevent double-loading on page refresh
+var _initialLoadDone = false;
 
 // Auth state change listener
 supabase.auth.onAuthStateChange(async function (event, session) {
   try {
+    // INITIAL_SESSION fires on page load — start() already handles that
+    if (event === "INITIAL_SESSION") {
+      if (!_initialLoadDone && session && session.user) {
+        _initialLoadDone = true;
+        currentUser = session.user;
+        showAppView();
+        hideStartupLoader();
+        await Promise.all([loadUserProfile(), loadAllData()]);
+        updateHeaderUserInfo();
+        applyRoleVisibility();
+        setupRealtime();
+      } else if (!session) {
+        _initialLoadDone = true;
+      }
+      return;
+    }
+
     if (event === "SIGNED_IN" && session) {
+      _initialLoadDone = true;
       currentUser = session.user;
       showAppView();
-      // Load profile AND data in parallel
+      hideStartupLoader();
       await Promise.all([loadUserProfile(), loadAllData()]);
       updateHeaderUserInfo();
       applyRoleVisibility();
       setupRealtime();
     } else if (event === "SIGNED_OUT") {
+      _initialLoadDone = false;
       currentUser = null;
       currentUserProfile = null;
       categories = [];
@@ -1299,6 +1347,7 @@ function hideStartupLoader() {
     var session = result.data.session;
 
     if (session && session.user) {
+      _initialLoadDone = true;
       currentUser = session.user;
       showAppView();
       hideStartupLoader();
@@ -1311,18 +1360,21 @@ function hideStartupLoader() {
         setupRealtime();
       } catch (loadErr) {
         console.error("Session load failed, signing out:", loadErr);
-        await supabase.auth.signOut();
+        _initialLoadDone = false;
+        try { await supabase.auth.signOut(); } catch (_) {}
         currentUser = null;
         currentUserProfile = null;
         hideStartupLoader();
         showLoginView();
       }
     } else {
+      _initialLoadDone = true;
       hideStartupLoader();
       showLoginView();
     }
   } catch (e) {
     console.error("Startup error:", e);
+    _initialLoadDone = true;
     hideStartupLoader();
     showLoginView();
   } finally {
