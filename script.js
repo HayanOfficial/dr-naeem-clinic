@@ -197,12 +197,23 @@ supabase.auth.onAuthStateChange(async function (event, session) {
       if (!_initialLoadDone && session && session.user) {
         _initialLoadDone = true;
         currentUser = session.user;
-        showAppView();
-        hideStartupLoader();
-        await Promise.all([loadUserProfile(), loadAllData()]);
-        updateHeaderUserInfo();
-        applyRoleVisibility();
-        setupRealtime();
+        try {
+          await Promise.all([loadUserProfile(), loadAllData()]);
+          updateHeaderUserInfo();
+          applyRoleVisibility();
+          setupRealtime();
+          showAppView();
+          hideStartupLoader();
+        } catch (e) {
+          console.error("INITIAL_SESSION load error:", e);
+          try { await supabase.auth.signOut(); } catch (_) {}
+          _initialLoadDone = false;
+          currentUser = null;
+          currentUserProfile = null;
+          categories = [];
+          questions = [];
+          showLoginView();
+        }
       } else if (!session) {
         _initialLoadDone = true;
       }
@@ -212,12 +223,17 @@ supabase.auth.onAuthStateChange(async function (event, session) {
     if (event === "SIGNED_IN" && session) {
       _initialLoadDone = true;
       currentUser = session.user;
-      showAppView();
-      hideStartupLoader();
-      await Promise.all([loadUserProfile(), loadAllData()]);
-      updateHeaderUserInfo();
-      applyRoleVisibility();
-      setupRealtime();
+      try {
+        await Promise.all([loadUserProfile(), loadAllData()]);
+        updateHeaderUserInfo();
+        applyRoleVisibility();
+        setupRealtime();
+        showAppView();
+        hideStartupLoader();
+      } catch (e) {
+        console.error("SIGNED_IN load error:", e);
+        showLoginView();
+      }
     } else if (event === "SIGNED_OUT") {
       _initialLoadDone = false;
       currentUser = null;
@@ -1348,8 +1364,8 @@ function hideStartupLoader() {
     if (session && session.user) {
       _initialLoadDone = true;
       currentUser = session.user;
-      showAppView();
-      hideStartupLoader();
+      // Don't show app yet — wait for profile + data to load first
+      // (startupLoader stays visible as the loading indicator)
 
       try {
         await Promise.race([
@@ -1359,6 +1375,8 @@ function hideStartupLoader() {
         updateHeaderUserInfo();
         applyRoleVisibility();
         setupRealtime();
+        showAppView();  // Now show app — profile loaded, role correct
+        hideStartupLoader();
       } catch (loadErr) {
         console.error("Session load failed:", loadErr);
         _initialLoadDone = false;
