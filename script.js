@@ -1342,7 +1342,6 @@ function hideStartupLoader() {
 
 (async function start() {
   try {
-    // getSession() is instant — reads from browser storage
     var result = await supabase.auth.getSession();
     var session = result.data.session;
 
@@ -1353,31 +1352,33 @@ function hideStartupLoader() {
       hideStartupLoader();
 
       try {
-        // Load profile AND data in parallel — cuts wait in half
-        await Promise.all([loadUserProfile(), loadAllData()]);
+        await Promise.race([
+          Promise.all([loadUserProfile(), loadAllData()]),
+          new Promise(function (_, rej) { setTimeout(function () { rej(new Error("timeout")); }, 10000); })
+        ]);
         updateHeaderUserInfo();
         applyRoleVisibility();
         setupRealtime();
       } catch (loadErr) {
-        console.error("Session load failed, signing out:", loadErr);
+        console.error("Session load failed:", loadErr);
         _initialLoadDone = false;
         try { await supabase.auth.signOut(); } catch (_) {}
         currentUser = null;
         currentUserProfile = null;
-        hideStartupLoader();
+        categories = [];
+        questions = [];
         showLoginView();
       }
     } else {
       _initialLoadDone = true;
-      hideStartupLoader();
       showLoginView();
     }
   } catch (e) {
     console.error("Startup error:", e);
     _initialLoadDone = true;
-    hideStartupLoader();
     showLoginView();
   } finally {
+    hideStartupLoader();
     hideAppLoading();
   }
 })();
