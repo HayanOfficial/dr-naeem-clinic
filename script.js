@@ -189,12 +189,12 @@ document.getElementById("logoutBtn").addEventListener("click", async function ()
 // Flag to prevent double-loading on page refresh
 var _initialLoadDone = false;
 
-// Auth state change listener
+// Single source of truth for auth initialization
+// Supabase fires INITIAL_SESSION once on page load with cached session
 supabase.auth.onAuthStateChange(async function (event, session) {
   try {
-    // INITIAL_SESSION fires on page load — start() already handles that
     if (event === "INITIAL_SESSION") {
-      if (!_initialLoadDone && session && session.user) {
+      if (session && session.user) {
         _initialLoadDone = true;
         currentUser = session.user;
         try {
@@ -206,16 +206,17 @@ supabase.auth.onAuthStateChange(async function (event, session) {
           hideStartupLoader();
         } catch (e) {
           console.error("INITIAL_SESSION load error:", e);
-          try { await supabase.auth.signOut(); } catch (_) {}
-          _initialLoadDone = false;
           currentUser = null;
           currentUserProfile = null;
           categories = [];
           questions = [];
+          hideStartupLoader();
           showLoginView();
         }
-      } else if (!session) {
+      } else {
         _initialLoadDone = true;
+        hideStartupLoader();
+        showLoginView();
       }
       return;
     }
@@ -232,6 +233,7 @@ supabase.auth.onAuthStateChange(async function (event, session) {
         hideStartupLoader();
       } catch (e) {
         console.error("SIGNED_IN load error:", e);
+        hideStartupLoader();
         showLoginView();
       }
     } else if (event === "SIGNED_OUT") {
@@ -250,6 +252,15 @@ supabase.auth.onAuthStateChange(async function (event, session) {
     hideAppLoading();
   }
 });
+
+// Safety timeout: if INITIAL_SESSION never fires (SDK issue), show login after 15s
+setTimeout(function () {
+  if (!_initialLoadDone) {
+    console.warn("INITIAL_SESSION never fired — showing login as fallback");
+    _initialLoadDone = true;
+    showLoginView();
+  }
+}, 15000);
 
 
 /* =================================================================
@@ -1356,47 +1367,8 @@ function hideStartupLoader() {
   if (el) el.style.display = "none";
 }
 
-(async function start() {
-  try {
-    var result = await supabase.auth.getSession();
-    var session = result.data.session;
-
-    if (session && session.user) {
-      _initialLoadDone = true;
-      currentUser = session.user;
-      // Don't show app yet — wait for profile + data to load first
-      // (startupLoader stays visible as the loading indicator)
-
-      try {
-        await Promise.race([
-          Promise.all([loadUserProfile(), loadAllData()]),
-          new Promise(function (_, rej) { setTimeout(function () { rej(new Error("timeout")); }, 10000); })
-        ]);
-        updateHeaderUserInfo();
-        applyRoleVisibility();
-        setupRealtime();
-        showAppView();  // Now show app — profile loaded, role correct
-        hideStartupLoader();
-      } catch (loadErr) {
-        console.error("Session load failed:", loadErr);
-        _initialLoadDone = false;
-        try { await supabase.auth.signOut(); } catch (_) {}
-        currentUser = null;
-        currentUserProfile = null;
-        categories = [];
-        questions = [];
-        showLoginView();
-      }
-    } else {
-      _initialLoadDone = true;
-      showLoginView();
-    }
-  } catch (e) {
-    console.error("Startup error:", e);
-    _initialLoadDone = true;
-    showLoginView();
-  } finally {
-    hideStartupLoader();
-    hideAppLoading();
-  }
-})();
+// Fallback: hide startup loader after 15s even if nothing fires
+setTimeout(function () {
+  hideStartupLoader();
+  hideAppLoading();
+}, 15000);
