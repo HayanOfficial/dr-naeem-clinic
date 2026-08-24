@@ -186,35 +186,131 @@ document.getElementById("logoutBtn").addEventListener("click", async function ()
   showLoginView();
 });
 
-// Flag to prevent double-loading on page refresh
-var _initialLoadDone = false;
+// =================================================================
+// SINGLETON INITIALIZATION LOCK
+// 
+// Multiple events can trigger app initialization on page load:
+//   - start() IIFE calls getSession() directly
+//   - onAuthStateChange fires INITIAL_SESSION
+//   - onAuthStateChange fires SIGNED_IN
+//
+// Instead of each path duplicating the load/render logic, they ALL
+// call initializeAuthenticatedApp(). A promise-based lock ensures
+// only ONE call does the real work; concurrent callers await the
+// same in-flight promise.
+// =================================================================
 
-// Single source of truth for auth initialization
-// Supabase fires INITIAL_SESSION once on page load with cached session
+var _initLock = null;       // in-flight promise (null = not initializing)
+var _initDone = false;      // true after initialization completed for current session
+var _initUserId = null;     // tracks which user was initialized (to reset on user change)
+
+function initializeAuthenticatedApp(session) {
+  // If already done for this exact user, no-op
+  if (_initDone && _initUserId === session.user.id) {
+    return Promise.resolve();
+  }
+
+  // If initialization is already in progress, return the existing promise
+  if (_initLock) {
+    return _initLock;
+  }
+
+  // Start initialization — store the promise so any concurrent caller
+  // will await this same promise instead of starting a second one
+  _initLock = (async function () {
+    try {
+      currentUser = session.user;
+
+      // Load profile + data in parallel
+      await Promise.all([loadUserProfile(), loadAllData()]);
+
+      // Apply role/permissions AFTER profile is loaded
+      updateHeaderUserInfo();
+      applyRoleVisibility();
+
+      // Setup realtime AFTER data is loaded
+      setupRealtime();
+
+      // NOW it's safe to show the app — profile/role/data are all ready
+      showAppView();
+      hideStartupLoader();
+      hideAppLoading();
+
+      _initDone = true;
+      _initUserId = session.user.id;
+    } catch (e) {
+      console.error("initializeAuthenticatedApp error:", e);
+      currentUser = null;
+      currentUserProfile = null;
+      categories = [];
+      questions = [];
+      _initDone = false;
+      _initUserId = null;
+      hideStartupLoader();
+      showLoginView();
+    } finally {
+      _initLock = null;  // release the lock
+    }
+  })();
+
+  return _initLock;
+}
+
+function resetInitLock() {
+  _initLock = null;
+  _initDone = false;
+  _initUserId = null;
+}
+
+// =================================================================
+// PRIMARY: start() IIFE — calls getSession() directly
+// This fires first (synchronously on script load) and is the fastest
+// path to restoration. onAuthStateChange's INITIAL_SESSION will call
+// into the same guarded function and be a safe no-op.
+// =================================================================
+
+(async function start() {
+  try {
+    var result = await supabase.auth.getSession();
+    var session = result.data.session;
+
+    if (session && session.user) {
+      await initializeAuthenticatedApp(session);
+    } else {
+      hideStartupLoader();
+      showLoginView();
+    }
+  } catch (e) {
+    console.error("Startup error:", e);
+    hideStartupLoader();
+    showLoginView();
+  }
+})();
+
+// Safety: if start() + INITIAL_SESSION both fail to fire, show login
+setTimeout(function () {
+  if (!_initDone && !_initLock) {
+    console.warn("No auth event fired within 15s — showing login");
+    hideStartupLoader();
+    showLoginView();
+  }
+}, 15000);
+
+// =================================================================
+// SECONDARY: onAuthStateChange — handles INITIAL_SESSION, SIGNED_IN,
+// SIGNED_OUT. INITIAL_SESSION and SIGNED_IN both call the SAME
+// guarded function. SIGNED_OUT resets the lock.
+// =================================================================
+
 supabase.auth.onAuthStateChange(async function (event, session) {
   try {
     if (event === "INITIAL_SESSION") {
       if (session && session.user) {
-        _initialLoadDone = true;
-        currentUser = session.user;
-        try {
-          await Promise.all([loadUserProfile(), loadAllData()]);
-          updateHeaderUserInfo();
-          applyRoleVisibility();
-          setupRealtime();
-          showAppView();
-          hideStartupLoader();
-        } catch (e) {
-          console.error("INITIAL_SESSION load error:", e);
-          currentUser = null;
-          currentUserProfile = null;
-          categories = [];
-          questions = [];
-          hideStartupLoader();
-          showLoginView();
-        }
+        // start() may have already started/finished — safe no-op
+        await initializeAuthenticatedApp(session);
       } else {
-        _initialLoadDone = true;
+        // No session on startup — show login
+        resetInitLock();
         hideStartupLoader();
         showLoginView();
       }
@@ -222,22 +318,13 @@ supabase.auth.onAuthStateChange(async function (event, session) {
     }
 
     if (event === "SIGNED_IN" && session) {
-      _initialLoadDone = true;
-      currentUser = session.user;
-      try {
-        await Promise.all([loadUserProfile(), loadAllData()]);
-        updateHeaderUserInfo();
-        applyRoleVisibility();
-        setupRealtime();
-        showAppView();
-        hideStartupLoader();
-      } catch (e) {
-        console.error("SIGNED_IN load error:", e);
-        hideStartupLoader();
-        showLoginView();
+      // Reset lock if different user (e.g. account switch)
+      if (_initUserId && _initUserId !== session.user.id) {
+        resetInitLock();
       }
+      await initializeAuthenticatedApp(session);
     } else if (event === "SIGNED_OUT") {
-      _initialLoadDone = false;
+      resetInitLock();
       currentUser = null;
       currentUserProfile = null;
       categories = [];
@@ -252,15 +339,6 @@ supabase.auth.onAuthStateChange(async function (event, session) {
     hideAppLoading();
   }
 });
-
-// Safety timeout: if INITIAL_SESSION never fires (SDK issue), show login after 15s
-setTimeout(function () {
-  if (!_initialLoadDone) {
-    console.warn("INITIAL_SESSION never fired — showing login as fallback");
-    _initialLoadDone = true;
-    showLoginView();
-  }
-}, 15000);
 
 
 /* =================================================================
