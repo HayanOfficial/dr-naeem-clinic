@@ -188,7 +188,7 @@ document.getElementById("logoutBtn").addEventListener("click", async function ()
 
 // =================================================================
 // SINGLETON INITIALIZATION LOCK
-// 
+//
 // Multiple events can trigger app initialization on page load:
 //   - start() IIFE calls getSession() directly
 //   - onAuthStateChange fires INITIAL_SESSION
@@ -200,73 +200,60 @@ document.getElementById("logoutBtn").addEventListener("click", async function ()
 // same in-flight promise.
 // =================================================================
 
-var _initLock = null;       // in-flight promise (null = not initializing)
-var _initDone = false;      // true after initialization completed for current session
-var _initUserId = null;     // tracks which user was initialized (to reset on user change)
+var _authInitPromise = null;      // in-flight / completed init for current session
+var _authInitSessionKey = null;   // which session that promise belongs to
+
+function _sessionKey(session) {
+  return (session && session.user) ? (session.user.id + ":" + session.access_token) : null;
+}
+
+function resetAuthState() {
+  _authInitPromise = null;
+  _authInitSessionKey = null;
+  currentUser = null;
+  currentUserProfile = null;
+  categories = [];
+  questions = [];
+  activeCategoryId = null;
+  activeQuestionId = null;
+  cleanupRealtime();
+}
 
 function initializeAuthenticatedApp(session) {
-  // If already done for this exact user, no-op
-  if (_initDone && _initUserId === session.user.id) {
-    return Promise.resolve();
+  var key = _sessionKey(session);
+
+  // Already running (or already finished) for this exact session —
+  // return the SAME promise instead of doing the work again.
+  if (_authInitPromise && _authInitSessionKey === key) {
+    return _authInitPromise;
   }
 
-  // If initialization is already in progress, return the existing promise
-  if (_initLock) {
-    return _initLock;
-  }
-
-  // Start initialization — store the promise so any concurrent caller
-  // will await this same promise instead of starting a second one
-  _initLock = (async function () {
+  _authInitSessionKey = key;
+  _authInitPromise = (async function () {
+    currentUser = session.user;
     try {
-      currentUser = session.user;
-
-      // Load profile + data in parallel
       await Promise.all([loadUserProfile(), loadAllData()]);
-
-      // Apply role/permissions AFTER profile is loaded
       updateHeaderUserInfo();
       applyRoleVisibility();
-
-      // Setup realtime AFTER data is loaded
       setupRealtime();
-
-      // NOW it's safe to show the app — profile/role/data are all ready
       showAppView();
       hideStartupLoader();
-      hideAppLoading();
-
-      _initDone = true;
-      _initUserId = session.user.id;
     } catch (e) {
-      console.error("initializeAuthenticatedApp error:", e);
-      currentUser = null;
-      currentUserProfile = null;
-      categories = [];
-      questions = [];
-      _initDone = false;
-      _initUserId = null;
-      hideStartupLoader();
+      console.error("App initialization error:", e);
+      try { await supabase.auth.signOut(); } catch (_) {}
+      resetAuthState();
       showLoginView();
-    } finally {
-      _initLock = null;  // release the lock
+      throw e;
     }
   })();
 
-  return _initLock;
-}
-
-function resetInitLock() {
-  _initLock = null;
-  _initDone = false;
-  _initUserId = null;
+  return _authInitPromise;
 }
 
 // =================================================================
-// PRIMARY: start() IIFE — calls getSession() directly
-// This fires first (synchronously on script load) and is the fastest
-// path to restoration. onAuthStateChange's INITIAL_SESSION will call
-// into the same guarded function and be a safe no-op.
+// start() IIFE — calls getSession() directly
+// Fires first (synchronously on script load). onAuthStateChange's
+// INITIAL_SESSION will call into the same guarded function.
 // =================================================================
 
 (async function start() {
@@ -289,7 +276,7 @@ function resetInitLock() {
 
 // Safety: if start() + INITIAL_SESSION both fail to fire, show login
 setTimeout(function () {
-  if (!_initDone && !_initLock) {
+  if (!_authInitPromise) {
     console.warn("No auth event fired within 15s — showing login");
     hideStartupLoader();
     showLoginView();
@@ -297,9 +284,9 @@ setTimeout(function () {
 }, 15000);
 
 // =================================================================
-// SECONDARY: onAuthStateChange — handles INITIAL_SESSION, SIGNED_IN,
-// SIGNED_OUT. INITIAL_SESSION and SIGNED_IN both call the SAME
-// guarded function. SIGNED_OUT resets the lock.
+// onAuthStateChange — handles INITIAL_SESSION, SIGNED_IN, SIGNED_OUT.
+// INITIAL_SESSION and SIGNED_IN both call the SAME guarded function.
+// SIGNED_OUT resets all state.
 // =================================================================
 
 supabase.auth.onAuthStateChange(async function (event, session) {
@@ -310,7 +297,7 @@ supabase.auth.onAuthStateChange(async function (event, session) {
         await initializeAuthenticatedApp(session);
       } else {
         // No session on startup — show login
-        resetInitLock();
+        resetAuthState();
         hideStartupLoader();
         showLoginView();
       }
@@ -318,18 +305,9 @@ supabase.auth.onAuthStateChange(async function (event, session) {
     }
 
     if (event === "SIGNED_IN" && session) {
-      // Reset lock if different user (e.g. account switch)
-      if (_initUserId && _initUserId !== session.user.id) {
-        resetInitLock();
-      }
       await initializeAuthenticatedApp(session);
     } else if (event === "SIGNED_OUT") {
-      resetInitLock();
-      currentUser = null;
-      currentUserProfile = null;
-      categories = [];
-      questions = [];
-      cleanupRealtime();
+      resetAuthState();
       showLoginView();
     }
   } catch (e) {
@@ -339,7 +317,6 @@ supabase.auth.onAuthStateChange(async function (event, session) {
     hideAppLoading();
   }
 });
-
 
 /* =================================================================
    3. USER PROFILE
@@ -1445,8 +1422,3 @@ function hideStartupLoader() {
   if (el) el.style.display = "none";
 }
 
-// Fallback: hide startup loader after 15s even if nothing fires
-setTimeout(function () {
-  hideStartupLoader();
-  hideAppLoading();
-}, 15000);
