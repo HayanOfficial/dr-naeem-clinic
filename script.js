@@ -187,82 +187,51 @@ document.getElementById("logoutBtn").addEventListener("click", async function ()
 });
 
 // =================================================================
-// SINGLETON INITIALIZATION LOCK
-//
-// Multiple events can trigger app initialization on page load:
-//   - start() IIFE calls getSession() directly
-//   - onAuthStateChange fires INITIAL_SESSION
-//   - onAuthStateChange fires SIGNED_IN
-//
-// Instead of each path duplicating the load/render logic, they ALL
-// call initializeAuthenticatedApp(). A promise-based lock ensures
-// only ONE call does the real work; concurrent callers await the
-// same in-flight promise.
+// INIT — single entry point, no race possible
 // =================================================================
 
-var _authInitPromise = null;      // in-flight / completed init for current session
-var _authInitSessionKey = null;   // which session that promise belongs to
+var _appReady = false;
 
-function _sessionKey(session) {
-  return (session && session.user) ? (session.user.id + ":" + session.access_token) : null;
-}
+async function initApp(session) {
+  if (_appReady) return;                    // already done — no-op
+  _appReady = true;                         // claim immediately
 
-function resetAuthState() {
-  _authInitPromise = null;
-  _authInitSessionKey = null;
-  currentUser = null;
-  currentUserProfile = null;
-  categories = [];
-  questions = [];
-  activeCategoryId = null;
-  activeQuestionId = null;
-  cleanupRealtime();
-}
+  currentUser = session.user;
 
-function initializeAuthenticatedApp(session) {
-  var key = _sessionKey(session);
+  try {
+    // 10s timeout — if Supabase SDK hangs (expired token, bad network), recover
+    await Promise.race([
+      Promise.all([loadUserProfile(), loadAllData()]),
+      new Promise(function (_, rej) {
+        setTimeout(function () { rej(new Error("init timeout")); }, 10000);
+      })
+    ]);
 
-  // Already running (or already finished) for this exact session —
-  // return the SAME promise instead of doing the work again.
-  if (_authInitPromise && _authInitSessionKey === key) {
-    return _authInitPromise;
+    // Profile loaded — now safe to apply role and show app
+    updateHeaderUserInfo();
+    applyRoleVisibility();
+    setupRealtime();
+    showAppView();
+    hideStartupLoader();
+  } catch (e) {
+    console.error("initApp failed:", e);
+    try { await supabase.auth.signOut(); } catch (_) {}
+    _appReady = false;
+    currentUser = null;
+    currentUserProfile = null;
+    categories = [];
+    questions = [];
+    hideStartupLoader();
+    showLoginView();
   }
-
-  _authInitSessionKey = key;
-  _authInitPromise = (async function () {
-    currentUser = session.user;
-    try {
-      await Promise.all([loadUserProfile(), loadAllData()]);
-      updateHeaderUserInfo();
-      applyRoleVisibility();
-      setupRealtime();
-      showAppView();
-      hideStartupLoader();
-    } catch (e) {
-      console.error("App initialization error:", e);
-      try { await supabase.auth.signOut(); } catch (_) {}
-      resetAuthState();
-      showLoginView();
-      throw e;
-    }
-  })();
-
-  return _authInitPromise;
 }
 
-// =================================================================
-// start() IIFE — calls getSession() directly
-// Fires first (synchronously on script load). onAuthStateChange's
-// INITIAL_SESSION will call into the same guarded function.
-// =================================================================
-
+// Primary: start() IIFE — fires on script load, fastest path
 (async function start() {
   try {
     var result = await supabase.auth.getSession();
-    var session = result.data.session;
-
-    if (session && session.user) {
-      await initializeAuthenticatedApp(session);
+    if (result.data.session && result.data.session.user) {
+      await initApp(result.data.session);
     } else {
       hideStartupLoader();
       showLoginView();
@@ -274,40 +243,29 @@ function initializeAuthenticatedApp(session) {
   }
 })();
 
-// Safety: if start() + INITIAL_SESSION both fail to fire, show login
+// Safety: if nothing worked after 8s, show login
 setTimeout(function () {
-  if (!_authInitPromise) {
-    console.warn("No auth event fired within 15s — showing login");
+  if (!_appReady) {
+    console.warn("Init timeout — showing login");
     hideStartupLoader();
     showLoginView();
   }
-}, 15000);
+}, 8000);
 
-// =================================================================
-// onAuthStateChange — handles INITIAL_SESSION, SIGNED_IN, SIGNED_OUT.
-// INITIAL_SESSION and SIGNED_IN both call the SAME guarded function.
-// SIGNED_OUT resets all state.
-// =================================================================
-
+// Secondary: onAuthStateChange handles fresh login/logout
+// INITIAL_SESSION is ignored — start() already handles page load
 supabase.auth.onAuthStateChange(async function (event, session) {
   try {
-    if (event === "INITIAL_SESSION") {
-      if (session && session.user) {
-        // start() may have already started/finished — safe no-op
-        await initializeAuthenticatedApp(session);
-      } else {
-        // No session on startup — show login
-        resetAuthState();
-        hideStartupLoader();
-        showLoginView();
-      }
-      return;
-    }
-
     if (event === "SIGNED_IN" && session) {
-      await initializeAuthenticatedApp(session);
+      _appReady = false;  // reset for new login
+      await initApp(session);
     } else if (event === "SIGNED_OUT") {
-      resetAuthState();
+      _appReady = false;
+      currentUser = null;
+      currentUserProfile = null;
+      categories = [];
+      questions = [];
+      cleanupRealtime();
       showLoginView();
     }
   } catch (e) {
