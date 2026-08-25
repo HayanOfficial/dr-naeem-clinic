@@ -187,27 +187,25 @@ document.getElementById("logoutBtn").addEventListener("click", async function ()
 });
 
 // =================================================================
-// INIT — single entry point, no race possible
+// INIT — single path via onAuthStateChange
 // =================================================================
 
 var _appReady = false;
 
+function hideStartupLoader() {
+  var el = document.getElementById("startupLoader");
+  if (el) el.style.display = "none";
+}
+
 async function initApp(session) {
-  if (_appReady) return;                    // already done — no-op
-  _appReady = true;                         // claim immediately
+  if (_appReady) return;
+  _appReady = true;
 
   currentUser = session.user;
 
   try {
-    // 10s timeout — if Supabase SDK hangs (expired token, bad network), recover
-    await Promise.race([
-      Promise.all([loadUserProfile(), loadAllData()]),
-      new Promise(function (_, rej) {
-        setTimeout(function () { rej(new Error("init timeout")); }, 10000);
-      })
-    ]);
+    await Promise.all([loadUserProfile(), loadAllData()]);
 
-    // Profile loaded — now safe to apply role and show app
     updateHeaderUserInfo();
     applyRoleVisibility();
     setupRealtime();
@@ -215,7 +213,6 @@ async function initApp(session) {
     hideStartupLoader();
   } catch (e) {
     console.error("initApp failed:", e);
-    try { await supabase.auth.signOut(); } catch (_) {}
     _appReady = false;
     currentUser = null;
     currentUserProfile = null;
@@ -226,39 +223,25 @@ async function initApp(session) {
   }
 }
 
-// Primary: start() IIFE — fires on script load, fastest path
-(async function start() {
-  try {
-    var result = await supabase.auth.getSession();
-    if (result.data.session && result.data.session.user) {
-      await initApp(result.data.session);
-    } else {
-      hideStartupLoader();
-      showLoginView();
-    }
-  } catch (e) {
-    console.error("Startup error:", e);
-    hideStartupLoader();
-    showLoginView();
-  }
-})();
-
-// Safety: if nothing worked after 8s, show login
+// Safety: if onAuthStateChange never fires after 8s, show login
 setTimeout(function () {
   if (!_appReady) {
-    console.warn("Init timeout — showing login");
     hideStartupLoader();
     showLoginView();
   }
 }, 8000);
 
-// Secondary: onAuthStateChange handles fresh login/logout
-// INITIAL_SESSION is ignored — start() already handles page load
+// THE single entry point for all auth state changes
 supabase.auth.onAuthStateChange(async function (event, session) {
   try {
-    if (event === "SIGNED_IN" && session) {
-      _appReady = false;  // reset for new login
-      await initApp(session);
+    if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
+      if (session && session.user) {
+        await initApp(session);
+      } else {
+        _appReady = false;
+        hideStartupLoader();
+        showLoginView();
+      }
     } else if (event === "SIGNED_OUT") {
       _appReady = false;
       currentUser = null;
@@ -266,10 +249,12 @@ supabase.auth.onAuthStateChange(async function (event, session) {
       categories = [];
       questions = [];
       cleanupRealtime();
+      hideStartupLoader();
       showLoginView();
     }
   } catch (e) {
-    console.error("Auth state error:", e);
+    console.error("Auth error:", e);
+    hideStartupLoader();
     showLoginView();
   } finally {
     hideAppLoading();
@@ -1368,15 +1353,5 @@ function refreshEverything() {
     renderAnswerPanel(null);
     document.getElementById("questionListTitle").textContent = "Questions";
   }
-}
-
-
-/* =================================================================
-   17. STARTUP
-   ================================================================= */
-
-function hideStartupLoader() {
-  var el = document.getElementById("startupLoader");
-  if (el) el.style.display = "none";
 }
 
