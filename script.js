@@ -1316,6 +1316,14 @@ function hideStartupLoader() {
 }
 
 (async function start() {
+  // Safety net: if everything hangs, show login after 12 seconds
+  var safetyTimeout = setTimeout(function () {
+    console.warn("Startup safety net triggered");
+    hideStartupLoader();
+    hideAppLoading();
+    showLoginView();
+  }, 12000);
+
   try {
     // getSession() is instant — reads from browser storage
     var result = await supabase.auth.getSession();
@@ -1334,21 +1342,30 @@ function hideStartupLoader() {
         setupRealtime();
       } catch (loadErr) {
         console.error("Session load failed, signing out:", loadErr);
-        await supabase.auth.signOut();
+        try {
+          await Promise.race([
+            supabase.auth.signOut(),
+            new Promise(function (_, rej) { setTimeout(function () { rej(new Error("signOut timeout")); }, 5000); })
+          ]);
+        } catch (_) {}
         currentUser = null;
         currentUserProfile = null;
         hideStartupLoader();
+        hideAppLoading();
         showLoginView();
       }
     } else {
       hideStartupLoader();
+      hideAppLoading();
       showLoginView();
     }
   } catch (e) {
     console.error("Startup error:", e);
     hideStartupLoader();
+    hideAppLoading();
     showLoginView();
   } finally {
+    clearTimeout(safetyTimeout);
     hideAppLoading();
   }
 })();
