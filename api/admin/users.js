@@ -15,10 +15,10 @@ module.exports = async function handler(req, res) {
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceKey) {
-    return res.status(500).json({ error: "Server configuration error" });
+    return res.status(500).json({ error: "Server configuration error: Missing environment variables" });
   }
 
-  // Verify the caller is authenticated and is an admin
+  // Verify the caller is authenticated and is an active admin
   const authHeader = req.headers.authorization;
   if (!authHeader) {
     return res.status(401).json({ error: "No authorization header" });
@@ -38,18 +38,18 @@ module.exports = async function handler(req, res) {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    // Check if user is admin
+    // Check if caller is an active admin
     const { data: profile, error: profileError } = await userSupabase
       .from("profiles")
-      .select("role")
+      .select("role, status")
       .eq("id", user.id)
       .single();
 
-    if (profileError || !profile || profile.role !== "admin") {
-      return res.status(403).json({ error: "Forbidden: admin access required" });
+    if (profileError || !profile || profile.role !== "admin" || profile.status !== "active") {
+      return res.status(403).json({ error: "Forbidden: active admin access required" });
     }
 
-    // Use service role for the actual operation
+    // Use service role for the actual admin operations
     const adminSupabase = createClient(supabaseUrl, supabaseServiceKey);
 
     switch (req.method) {
@@ -62,19 +62,23 @@ module.exports = async function handler(req, res) {
         }
 
         // Get all profiles
-        const { data: profiles } = await adminSupabase
+        const { data: profiles, error: profilesError } = await adminSupabase
           .from("profiles")
           .select("*");
 
+        if (profilesError) {
+          return res.status(500).json({ error: profilesError.message });
+        }
+
         // Merge auth users with profiles
-        const users = authUsers.users.map((u) => {
-          const profile = profiles?.find((p) => p.id === u.id);
+        const users = (authUsers.users || []).map((u) => {
+          const prof = profiles?.find((p) => p.id === u.id);
           return {
             id: u.id,
             email: u.email,
-            name: profile?.name || u.user_metadata?.name || "",
-            role: profile?.role || "user",
-            status: profile?.status || "active",
+            name: prof?.name || u.user_metadata?.name || "",
+            role: prof?.role || "user",
+            status: prof?.status || "active",
             created_at: u.created_at,
           };
         });
@@ -83,8 +87,8 @@ module.exports = async function handler(req, res) {
       }
 
       case "POST": {
-        // Create a new user
-        const { email, password, name, role } = req.body;
+        // Create a new staff user
+        const { email, password, name, role } = req.body || {};
 
         if (!email || !password) {
           return res
@@ -92,52 +96,64 @@ module.exports = async function handler(req, res) {
             .json({ error: "Email and password are required" });
         }
 
+        const userRole = role === "admin" ? "admin" : "user";
+
         const { data: newUser, error: createError } =
           await adminSupabase.auth.admin.createUser({
-            email,
-            password,
-            user_metadata: { name: name || "" },
-            email_confirm: true, // Auto-confirm since admin is creating
+            email: email.trim().toLowerCase(),
+            password: password,
+            user_metadata: { name: (name || "").trim() },
+            email_confirm: true, // Auto-confirm since admin is creating the account
           });
 
         if (createError) {
           return res.status(400).json({ error: createError.message });
         }
 
-        // Update profile with role and name if specified
-        const profileUpdates = {};
-        if (name) profileUpdates.name = name;
-        if (role && role !== "user") profileUpdates.role = role;
-
-        if (Object.keys(profileUpdates).length > 0) {
-          await adminSupabase
-            .from("profiles")
-            .update(profileUpdates)
-            .eq("id", newUser.user.id);
-        }
+        // Upsert profile record
+        await adminSupabase
+          .from("profiles")
+          .upsert({
+            id: newUser.user.id,
+            name: (name || "").trim(),
+            email: email.trim().toLowerCase(),
+            role: userRole,
+            status: "active",
+          });
 
         return res.status(200).json({
           user: {
             id: newUser.user.id,
             email: newUser.user.email,
-            name: name || "",
-            role: role || "user",
+            name: (name || "").trim(),
+            role: userRole,
+            status: "active",
           },
         });
       }
 
       case "PATCH": {
-        // Update user role, status, or name
-        const { userId, role, status, name } = req.body;
+        // Update user role, status, name, or password
+        const { userId, role, status, name, password } = req.body || {};
 
         if (!userId) {
           return res.status(400).json({ error: "userId is required" });
         }
 
-        // Update profile
+        // Prevent admin from disabling or demoting themselves
+        if (userId === user.id) {
+          if (status === "disabled") {
+            return res.status(400).json({ error: "Cannot disable your own admin account" });
+          }
+          if (role === "user") {
+            return res.status(400).json({ error: "Cannot demote your own admin account" });
+          }
+        }
+
+        // Update profile in DB
         const profileUpdates = {};
         if (role) profileUpdates.role = role;
-        if (name !== undefined) profileUpdates.name = name;
+        if (name !== undefined) profileUpdates.name = (name || "").trim();
         if (status) profileUpdates.status = status;
 
         if (Object.keys(profileUpdates).length > 0) {
@@ -150,23 +166,32 @@ module.exports = async function handler(req, res) {
           }
         }
 
-        // Handle user enable/disable via ban
+        // Update auth user settings (password, name metadata, ban status)
+        const authUpdates = {};
+        if (password) authUpdates.password = password;
+        if (name !== undefined) authUpdates.user_metadata = { name: (name || "").trim() };
         if (status === "disabled") {
-          await adminSupabase.auth.admin.updateUserById(userId, {
-            ban_duration: "100y",
-          });
+          authUpdates.ban_duration = "100y";
         } else if (status === "active") {
-          await adminSupabase.auth.admin.updateUserById(userId, {
-            ban_duration: 0,
-          });
+          authUpdates.ban_duration = "none";
+        }
+
+        if (Object.keys(authUpdates).length > 0) {
+          const { error: authUpdateErr } = await adminSupabase.auth.admin.updateUserById(
+            userId,
+            authUpdates
+          );
+          if (authUpdateErr) {
+            return res.status(400).json({ error: authUpdateErr.message });
+          }
         }
 
         return res.status(200).json({ success: true });
       }
 
       case "DELETE": {
-        // Delete a user
-        const { userId } = req.body;
+        // Delete a user account
+        const { userId } = req.body || {};
 
         if (!userId) {
           return res.status(400).json({ error: "userId is required" });
@@ -176,7 +201,7 @@ module.exports = async function handler(req, res) {
         if (userId === user.id) {
           return res
             .status(400)
-            .json({ error: "Cannot delete your own account" });
+            .json({ error: "Cannot delete your own admin account" });
         }
 
         const { error: deleteError } =
@@ -184,6 +209,9 @@ module.exports = async function handler(req, res) {
         if (deleteError) {
           return res.status(400).json({ error: deleteError.message });
         }
+
+        // Clean up profile if cascade didn't catch it
+        await adminSupabase.from("profiles").delete().eq("id", userId);
 
         return res.status(200).json({ success: true });
       }

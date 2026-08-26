@@ -1131,6 +1131,15 @@ textarea.urdu-text {
   background: var(--danger-bg);
 }
 
+.icon-btn.success {
+  color: var(--success);
+  border-color: #bbf7d0;
+}
+
+.icon-btn.success:hover {
+  background: var(--success-bg);
+}
+
 /* Form Cards */
 .entry-form {
   display: none;
