@@ -203,8 +203,17 @@ async function initApp(session) {
 
   currentUser = session.user;
 
+  // 10-second timeout — if Supabase hangs (stale token, slow network),
+  // we recover instead of staying stuck forever
+  var timeout = new Promise(function (_, reject) {
+    setTimeout(function () { reject(new Error("Init timeout")); }, 10000);
+  });
+
   try {
-    await Promise.all([loadUserProfile(), loadAllData()]);
+    await Promise.race([
+      Promise.all([loadUserProfile(), loadAllData()]),
+      timeout
+    ]);
 
     updateHeaderUserInfo();
     applyRoleVisibility();
@@ -218,6 +227,8 @@ async function initApp(session) {
     currentUserProfile = null;
     categories = [];
     questions = [];
+    cleanupRealtime();
+    try { await supabase.auth.signOut(); } catch (_) {}
     hideStartupLoader();
     showLoginView();
   }
@@ -231,7 +242,7 @@ setTimeout(function () {
   }
 }, 8000);
 
-// THE single entry point for all auth state changes
+// The single entry point for all auth state changes
 supabase.auth.onAuthStateChange(async function (event, session) {
   try {
     if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
@@ -260,6 +271,26 @@ supabase.auth.onAuthStateChange(async function (event, session) {
     hideAppLoading();
   }
 });
+
+// Backup: call getSession() directly in case onAuthStateChange never fires
+(async function startBackup() {
+  // Wait up to 5s for onAuthStateChange to fire first
+  await new Promise(function (r) { setTimeout(r, 5000); });
+  if (_appReady) return; // already handled
+  try {
+    var result = await supabase.auth.getSession();
+    var session = result.data.session;
+    if (session && session.user) {
+      await initApp(session);
+    } else {
+      hideStartupLoader();
+      showLoginView();
+    }
+  } catch (e) {
+    hideStartupLoader();
+    showLoginView();
+  }
+})();
 
 /* =================================================================
    3. USER PROFILE
