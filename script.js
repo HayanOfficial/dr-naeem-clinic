@@ -46,17 +46,6 @@ function isAdmin() {
 function showLoginView() {
   document.getElementById("loginView").style.display = "flex";
   document.getElementById("appContainer").style.display = "none";
-  // Reset login form to clean state
-  var loginForm = document.getElementById("loginForm");
-  if (loginForm) loginForm.reset();
-  var errEl = document.getElementById("loginError");
-  if (errEl) errEl.style.display = "none";
-  var submitBtn = document.getElementById("loginSubmitBtn");
-  if (submitBtn) submitBtn.disabled = false;
-  var btnText = document.getElementById("loginBtnText");
-  if (btnText) btnText.style.display = "inline";
-  var btnSpinner = document.getElementById("loginBtnSpinner");
-  if (btnSpinner) btnSpinner.style.display = "none";
 }
 
 // Show app, hide login
@@ -157,140 +146,47 @@ document.getElementById("togglePasswordBtn").addEventListener("click", function 
 
 // Logout
 document.getElementById("logoutBtn").addEventListener("click", async function () {
-  var btn = document.getElementById("logoutBtn");
-  btn.disabled = true;
-  btn.textContent = "Signing out...";
-
   try {
-    // signOut with 5 second timeout — don't hang forever
-    await Promise.race([
-      supabase.auth.signOut(),
-      new Promise(function (_, reject) {
-        setTimeout(function () { reject(new Error("Logout timeout")); }, 5000);
-      })
-    ]);
+    await supabase.auth.signOut();
   } catch (e) {
     console.error("Logout error:", e);
   }
-
-  // Always clean up and go to login — even if signOut failed
   currentUser = null;
   currentUserProfile = null;
   categories = [];
   questions = [];
   activeCategoryId = null;
   activeQuestionId = null;
-  cleanupRealtime();
-  btn.disabled = false;
-  btn.textContent = "Logout";
   showLoginView();
 });
 
-// =================================================================
-// INIT — single path via onAuthStateChange
-// =================================================================
-
-var _appReady = false;
-
-function hideStartupLoader() {
-  var el = document.getElementById("startupLoader");
-  if (el) el.style.display = "none";
-}
-
-async function initApp(session) {
-  if (_appReady) return;
-  _appReady = true;
-
-  currentUser = session.user;
-
-  // 10-second timeout — if Supabase hangs (stale token, slow network),
-  // we recover instead of staying stuck forever
-  var timeout = new Promise(function (_, reject) {
-    setTimeout(function () { reject(new Error("Init timeout")); }, 10000);
-  });
-
-  try {
-    await Promise.race([
-      Promise.all([loadUserProfile(), loadAllData()]),
-      timeout
-    ]);
-
-    updateHeaderUserInfo();
-    applyRoleVisibility();
-    setupRealtime();
-    showAppView();
-    hideStartupLoader();
-  } catch (e) {
-    console.error("initApp failed:", e);
-    _appReady = false;
-    currentUser = null;
-    currentUserProfile = null;
-    categories = [];
-    questions = [];
-    cleanupRealtime();
-    try { await supabase.auth.signOut(); } catch (_) {}
-    hideStartupLoader();
-    showLoginView();
-  }
-}
-
-// Safety: if onAuthStateChange never fires after 8s, show login
-setTimeout(function () {
-  if (!_appReady) {
-    hideStartupLoader();
-    showLoginView();
-  }
-}, 8000);
-
-// The single entry point for all auth state changes
+// Auth state change listener
 supabase.auth.onAuthStateChange(async function (event, session) {
   try {
-    if (event === "INITIAL_SESSION" || event === "SIGNED_IN") {
-      if (session && session.user) {
-        await initApp(session);
-      } else {
-        _appReady = false;
-        hideStartupLoader();
-        showLoginView();
-      }
+    if (event === "SIGNED_IN" && session) {
+      currentUser = session.user;
+      showAppView();
+      // Load profile AND data in parallel
+      await Promise.all([loadUserProfile(), loadAllData()]);
+      updateHeaderUserInfo();
+      applyRoleVisibility();
+      setupRealtime();
     } else if (event === "SIGNED_OUT") {
-      _appReady = false;
       currentUser = null;
       currentUserProfile = null;
       categories = [];
       questions = [];
       cleanupRealtime();
-      hideStartupLoader();
       showLoginView();
     }
   } catch (e) {
-    console.error("Auth error:", e);
-    hideStartupLoader();
+    console.error("Auth state error:", e);
     showLoginView();
   } finally {
     hideAppLoading();
   }
 });
 
-// Backup: call getSession() directly in case onAuthStateChange never fires
-(async function startBackup() {
-  // Wait up to 5s for onAuthStateChange to fire first
-  await new Promise(function (r) { setTimeout(r, 5000); });
-  if (_appReady) return; // already handled
-  try {
-    var result = await supabase.auth.getSession();
-    var session = result.data.session;
-    if (session && session.user) {
-      await initApp(session);
-    } else {
-      hideStartupLoader();
-      showLoginView();
-    }
-  } catch (e) {
-    hideStartupLoader();
-    showLoginView();
-  }
-})();
 
 /* =================================================================
    3. USER PROFILE
@@ -1386,3 +1282,50 @@ function refreshEverything() {
   }
 }
 
+
+/* =================================================================
+   17. STARTUP
+   ================================================================= */
+
+function hideStartupLoader() {
+  var el = document.getElementById("startupLoader");
+  if (el) el.style.display = "none";
+}
+
+(async function start() {
+  try {
+    // getSession() is instant — reads from browser storage
+    var result = await supabase.auth.getSession();
+    var session = result.data.session;
+
+    if (session && session.user) {
+      currentUser = session.user;
+      showAppView();
+      hideStartupLoader();
+
+      try {
+        // Load profile AND data in parallel — cuts wait in half
+        await Promise.all([loadUserProfile(), loadAllData()]);
+        updateHeaderUserInfo();
+        applyRoleVisibility();
+        setupRealtime();
+      } catch (loadErr) {
+        console.error("Session load failed, signing out:", loadErr);
+        await supabase.auth.signOut();
+        currentUser = null;
+        currentUserProfile = null;
+        hideStartupLoader();
+        showLoginView();
+      }
+    } else {
+      hideStartupLoader();
+      showLoginView();
+    }
+  } catch (e) {
+    console.error("Startup error:", e);
+    hideStartupLoader();
+    showLoginView();
+  } finally {
+    hideAppLoading();
+  }
+})();
