@@ -178,7 +178,6 @@ document.getElementById("logoutBtn").addEventListener("click", async function ()
   activeCategoryId = null;
   activeQuestionId = null;
   cleanupRealtime();
-  _clearViewState();
   btn.disabled = false;
   btn.textContent = "Logout";
   showLoginView();
@@ -207,95 +206,6 @@ function resetAuthState() {
   cleanupRealtime();
 }
 
-function withTimeout(promise, ms, label) {
-  return Promise.race([
-    promise,
-    new Promise(function (_, reject) {
-      setTimeout(function () {
-        reject(new Error((label || "Operation") + " timed out after " + ms + "ms"));
-      }, ms);
-    })
-  ]);
-}
-
-// ============================================================
-// RESUME FEATURE — sessionStorage persistence
-// ============================================================
-
-var _RESUME_KEY = "clinicApp:lastView";
-
-function _saveViewState() {
-  try {
-    var state = {
-      view: document.getElementById("manageView").classList.contains("active") ? "manage" : "assistant",
-      categoryId: activeCategoryId,
-      questionId: activeQuestionId
-    };
-    sessionStorage.setItem(_RESUME_KEY, JSON.stringify(state));
-  } catch (_) {}
-}
-
-function _restoreViewState() {
-  try {
-    var raw = sessionStorage.getItem(_RESUME_KEY);
-    if (!raw) return false;
-    var state = JSON.parse(raw);
-
-    if (state.categoryId && categories.some(function (c) { return c.id === state.categoryId; })) {
-      activeCategoryId = state.categoryId;
-    } else if (categories.length > 0) {
-      activeCategoryId = categories[0].id;
-    }
-
-    if (state.questionId && questions.some(function (q) { return q.id === state.questionId; })) {
-      activeQuestionId = state.questionId;
-    }
-
-    if (state.view === "manage" && isAdmin()) {
-      showManageView();
-    } else {
-      showAssistantView();
-    }
-
-    if (activeCategoryId) {
-      selectCategory(activeCategoryId);
-      if (activeQuestionId) {
-        var q = questions.find(function (item) { return item.id === activeQuestionId; });
-        if (q) {
-          activeQuestionId = q.id;
-          renderAnswerPanel(q);
-        }
-      }
-    }
-
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-function _clearViewState() {
-  try { sessionStorage.removeItem(_RESUME_KEY); } catch (_) {}
-}
-
-var _authInitSettled = true;
-
-async function _forceSignOut() {
-  try {
-    await withTimeout(supabase.auth.signOut(), 5000, "Signing out");
-  } catch (_) {}
-}
-
-function _showInitError(msg) {
-  hideStartupLoader();
-  showLoginView();
-  var errEl = document.getElementById("loginError");
-  if (errEl) {
-    errEl.textContent = msg;
-    errEl.style.display = "block";
-  }
-}
-
 function initializeAuthenticatedApp(session) {
   var key = _sessionKey(session);
   if (_authInitPromise && _authInitSessionKey === key) {
@@ -303,35 +213,21 @@ function initializeAuthenticatedApp(session) {
   }
 
   _authInitSessionKey = key;
-  _authInitSettled = false;
   _authInitPromise = (async function () {
     currentUser = session.user;
     try {
-      await withTimeout(
-        Promise.all([loadUserProfile(), loadAllData()]),
-        15000,
-        "Loading your account"
-      );
-
+      await Promise.all([loadUserProfile(), loadAllData()]);
       updateHeaderUserInfo();
       applyRoleVisibility();
-
-      try {
-        setupRealtime();
-      } catch (rtErr) {
-        console.warn("Realtime setup failed (non-blocking):", rtErr);
-      }
-
-      _restoreViewState();
+      setupRealtime();
       showAppView();
       hideStartupLoader();
-      _authInitSettled = true;
     } catch (e) {
       console.error("App initialization error:", e);
-      _authInitSettled = true;
-      await _forceSignOut();
+      try { await supabase.auth.signOut(); } catch (_) {}
       resetAuthState();
-      _showInitError("Connection was too slow or interrupted. Please log in again.");
+      showLoginView();
+      throw e;
     }
   })();
   return _authInitPromise;
@@ -343,7 +239,6 @@ supabase.auth.onAuthStateChange(async function (event, session) {
     if ((event === "INITIAL_SESSION" || event === "SIGNED_IN") && session && session.user) {
       await initializeAuthenticatedApp(session);
     } else if (event === "SIGNED_OUT" || (event === "INITIAL_SESSION" && !session)) {
-      _clearViewState();
       resetAuthState();
       hideStartupLoader();
       showLoginView();
@@ -631,7 +526,6 @@ function applyTextDirection(el, text) {
 function showAssistantView() {
   document.getElementById("assistantView").classList.add("active");
   document.getElementById("manageView").classList.remove("active");
-  _saveViewState();
   document.getElementById("assistantHeaderRight").style.display = isAdmin() ? "flex" : "none";
   document.getElementById("assistantSearchWrap").style.display = "flex";
   document.getElementById("manageHeaderRight").style.display = "none";
@@ -642,7 +536,6 @@ function showManageView() {
   if (!isAdmin()) return;
   document.getElementById("assistantView").classList.remove("active");
   document.getElementById("manageView").classList.add("active");
-  _saveViewState();
   document.getElementById("assistantHeaderRight").style.display = "none";
   document.getElementById("assistantSearchWrap").style.display = "none";
   document.getElementById("manageHeaderRight").style.display = "flex";
@@ -710,7 +603,6 @@ function renderCategoryList() {
 function selectCategory(categoryId) {
   activeCategoryId = categoryId;
   activeQuestionId = null;
-  _saveViewState();
   document.getElementById("searchInput").value = "";
   renderCategoryList();
   renderQuestionList(questions.filter(function (q) { return q.categoryId === categoryId; }));
@@ -752,7 +644,6 @@ function renderQuestionList(list) {
     btn.addEventListener("click", function () {
       activeQuestionId = q.id;
       renderAnswerPanel(q);
-      _saveViewState();
       document.querySelectorAll(".question-item button").forEach(function (b) { b.classList.remove("selected"); });
       this.classList.add("selected");
       document.getElementById("answerPanel").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1482,13 +1373,10 @@ function hideStartupLoader() {
   }
 })();
 
-// Safety: hard backstop — guarantee user sees login within 18s
+// Safety: if nothing has initialized after 10s, show login
 setTimeout(function () {
-  if (!_authInitSettled) {
-    console.warn("Startup safety net triggered — forcing login view.");
-    _authInitSettled = true;
-    _forceSignOut();
-    resetAuthState();
-    _showInitError("Session restore timed out. Please log in again.");
+  if (!_authInitPromise) {
+    hideStartupLoader();
+    showLoginView();
   }
-}, 18000);
+}, 10000);
