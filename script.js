@@ -183,70 +183,30 @@ document.getElementById("logoutBtn").addEventListener("click", async function ()
   showLoginView();
 });
 
-// =================================================================
-// INIT — single guarded path via initializeAuthenticatedApp()
-// =================================================================
-
-var _authInitPromise = null;
-var _authInitSessionKey = null;
-
-function _sessionKey(session) {
-  return (session && session.user) ? (session.user.id + ":" + session.access_token) : null;
-}
-
-function resetAuthState() {
-  _authInitPromise = null;
-  _authInitSessionKey = null;
-  currentUser = null;
-  currentUserProfile = null;
-  categories = [];
-  questions = [];
-  activeCategoryId = null;
-  activeQuestionId = null;
-  cleanupRealtime();
-}
-
-function initializeAuthenticatedApp(session) {
-  var key = _sessionKey(session);
-  if (_authInitPromise && _authInitSessionKey === key) {
-    return _authInitPromise;
-  }
-
-  _authInitSessionKey = key;
-  _authInitPromise = (async function () {
-    currentUser = session.user;
-    try {
+// Auth state change listener
+supabase.auth.onAuthStateChange(async function (event, session) {
+  try {
+    if (event === "SIGNED_IN" && session) {
+      currentUser = session.user;
+      showAppView();
+      // Load profile AND data in parallel
       await Promise.all([loadUserProfile(), loadAllData()]);
       updateHeaderUserInfo();
       applyRoleVisibility();
       setupRealtime();
-      showAppView();
-      hideStartupLoader();
-    } catch (e) {
-      console.error("App initialization error:", e);
-      try { await supabase.auth.signOut(); } catch (_) {}
-      resetAuthState();
-      showLoginView();
-      throw e;
-    }
-  })();
-  return _authInitPromise;
-}
-
-// Both entry points call the SAME guarded function
-supabase.auth.onAuthStateChange(async function (event, session) {
-  try {
-    if ((event === "INITIAL_SESSION" || event === "SIGNED_IN") && session && session.user) {
-      await initializeAuthenticatedApp(session);
-    } else if (event === "SIGNED_OUT" || (event === "INITIAL_SESSION" && !session)) {
-      resetAuthState();
-      hideStartupLoader();
+    } else if (event === "SIGNED_OUT") {
+      currentUser = null;
+      currentUserProfile = null;
+      categories = [];
+      questions = [];
+      cleanupRealtime();
       showLoginView();
     }
   } catch (e) {
     console.error("Auth state error:", e);
-    hideStartupLoader();
     showLoginView();
+  } finally {
+    hideAppLoading();
   }
 });
 
@@ -1357,11 +1317,29 @@ function hideStartupLoader() {
 
 (async function start() {
   try {
+    // getSession() is instant — reads from browser storage
     var result = await supabase.auth.getSession();
     var session = result.data.session;
 
     if (session && session.user) {
-      await initializeAuthenticatedApp(session);
+      currentUser = session.user;
+      showAppView();
+      hideStartupLoader();
+
+      try {
+        // Load profile AND data in parallel — cuts wait in half
+        await Promise.all([loadUserProfile(), loadAllData()]);
+        updateHeaderUserInfo();
+        applyRoleVisibility();
+        setupRealtime();
+      } catch (loadErr) {
+        console.error("Session load failed, signing out:", loadErr);
+        await supabase.auth.signOut();
+        currentUser = null;
+        currentUserProfile = null;
+        hideStartupLoader();
+        showLoginView();
+      }
     } else {
       hideStartupLoader();
       showLoginView();
@@ -1370,13 +1348,7 @@ function hideStartupLoader() {
     console.error("Startup error:", e);
     hideStartupLoader();
     showLoginView();
+  } finally {
+    hideAppLoading();
   }
 })();
-
-// Safety: if nothing has initialized after 10s, show login
-setTimeout(function () {
-  if (!_authInitPromise) {
-    hideStartupLoader();
-    showLoginView();
-  }
-}, 10000);
